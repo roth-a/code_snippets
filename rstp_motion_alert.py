@@ -153,6 +153,7 @@ def paint_contours(contours, frame, threshold=threshold):
 
 
 def save_frame(frame, folder=rec_folder):
+	os.makedirs(folder, exist_ok=True)
 	if not os.path.exists(folder):
 		folder = '/tmp'
 	filename = os.path.join(folder, f"frame_{datetime.datetime.now()}.jpg")
@@ -162,6 +163,7 @@ def save_frame(frame, folder=rec_folder):
 	
 	
 def record_video(video, folder=rec_folder):	
+	os.makedirs(folder, exist_ok=True)
 	if not os.path.exists(folder):
 		folder = '/tmp'
 	start_time = datetime.datetime.now()
@@ -185,6 +187,7 @@ def record_video(video, folder=rec_folder):
 	print('  End recording')
 	return filename
 	
+
 
 	
 def callback_alarm(video, frame):
