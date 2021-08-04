@@ -205,7 +205,7 @@ video=create_camera()
 
 while not signal_interupt:
 	check, frame = video.read()
-	while not check:
+	while not check and not signal_interupt:
 		print('Error: restarting camera')
 		video=create_camera()
 		check, frame = video.read()
