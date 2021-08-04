@@ -15,16 +15,19 @@ rtsp = f"rtsp://{rtsp_username}:{rtsp_password}@{rtsp_IP}:{rtsp_port}/some/path"
 # customize lines above 
     
 #%%
-
-    
 enable_send_email = production
 enable_motion_alarm = production
 
 #%%
+from collections import deque
 
-last_frame = None
-last_frame_counter = 0
-last_frame_reset = 20 * video_recording_length
+frame_rate = 20
+past_record_frames = int(video_recording_length/2 * frame_rate) 
+frames = deque(maxlen=past_record_frames + 1)  # + 1 for the current frame
+
+reference_frame = None
+reference_frame_counter = 0
+reference_frame_reset = 20 * video_recording_length
 show_video = not enable_motion_alarm
 threshold = 4000
 #%%
@@ -110,6 +113,19 @@ def create_camera():
 
 #%%
 
+def get_frame(video, endless_retry=False):
+	check, frame = video.read()
+	while endless_retry and not check and not signal_interupt:
+		print('Error: restarting camera')
+		video=create_camera()
+		check, frame = video.read()
+	
+	frames.append(frame)
+	
+	key = cv2.waitKey(1)	
+	return frame
+	
+	
 
 def get_contours(frame):
 	gray_frame=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
@@ -117,18 +133,18 @@ def get_contours(frame):
 
 	blur_frame = cv2.blur(gray_frame, (5,5))
 	
-	global last_frame 
-	if last_frame is None:
-		last_frame = blur_frame
+	global reference_frame 
+	if reference_frame is None:
+		reference_frame = blur_frame
 		return  
 
-	delta_frame=cv2.absdiff(last_frame,blur_frame)
-	global last_frame_counter
-	last_frame_counter += 1
-	if last_frame_counter > last_frame_reset:
+	delta_frame=cv2.absdiff(reference_frame,blur_frame)
+	global reference_frame_counter
+	reference_frame_counter += 1
+	if reference_frame_counter > reference_frame_reset:
 		print('Reset reference frame')
-		last_frame_counter = 0
-		last_frame = blur_frame
+		reference_frame_counter = 0
+		reference_frame = blur_frame
 
 	threshold_frame=cv2.threshold(delta_frame,35,255, cv2.THRESH_BINARY)[1]
 	(contours,_)=cv2.findContours(threshold_frame,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
@@ -153,7 +169,11 @@ def paint_contours(contours, frame, threshold=threshold):
 
 
 def save_frame(frame, folder=rec_folder):
-	os.makedirs(folder, exist_ok=True)
+	try:
+		os.makedirs(folder, exist_ok=True)
+	except:
+		pass
+
 	if not os.path.exists(folder):
 		folder = '/tmp'
 	filename = os.path.join(folder, f"frame_{datetime.datetime.now()}.jpg")
@@ -163,7 +183,11 @@ def save_frame(frame, folder=rec_folder):
 	
 	
 def record_video(video, folder=rec_folder):	
-	os.makedirs(folder, exist_ok=True)
+	try:
+		os.makedirs(folder, exist_ok=True)
+	except:
+		pass
+	
 	if not os.path.exists(folder):
 		folder = '/tmp'
 	start_time = datetime.datetime.now()
@@ -171,23 +195,28 @@ def record_video(video, folder=rec_folder):
 	width=  int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
 	height= int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
 		
-	writer= cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'XVID'), 20, (width,height))
+	writer= cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'XVID'), frame_rate, (width,height))
 		
 		
 	print('  Start recording')
-	while True:
-		check, frame = video.read()
-		
+	def write_frame(frame):
 		contours = get_contours(frame)
-		paint_contours(contours, frame)	
+		paint_contours(contours, frame)			
+		writer.write(cv2.resize(frame, (width, height)))			
+	
+	print(f'Writing {len(frames)} old frames')
+	for frame in frames:
+		write_frame(frame)		
 		
-		writer.write(cv2.resize(frame, (width, height)))
+	while True:
+		frame = get_frame(video)		
+		write_frame(frame)
+		
 		if datetime.datetime.now() - start_time >= datetime.timedelta(seconds=video_recording_length):
 			break	
 	print('  End recording')
 	return filename
 	
-
 
 	
 def callback_alarm(video, frame):
@@ -207,12 +236,7 @@ def callback_alarm(video, frame):
 video=create_camera()
 
 while not signal_interupt:
-	check, frame = video.read()
-	while not check and not signal_interupt:
-		print('Error: restarting camera')
-		video=create_camera()
-		check, frame = video.read()
-		
+	frame = get_frame(video, endless_retry=True)		
 	contours = get_contours(frame)
 	if contours_over_threshold(contours):
 		paint_contours(contours, frame)	
@@ -226,13 +250,12 @@ while not signal_interupt:
 
 	if show_video:
 		cv2.imshow('motion detector', frame) 
-	
-	key = cv2.waitKey(1)
-	if key == ord('q'):
-		break
+# 	record_video(video)
 	
 video.release()
 cv2.destroyAllWindows()
+
+
 
 
 
